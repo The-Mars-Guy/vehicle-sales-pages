@@ -7,29 +7,89 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="container">
-      <h1>Total Vehicle Sales (Monthly, last 10y)</h1>
-      <p class="muted" id="meta">Loading…</p>
-
-      <section class="card">
-        <h2>Downloads</h2>
-        <div class="buttons">
-          <a class="btn" id="dl-xlsx" href="#" download>Download all countries (XLSX)</a>
-          <a class="btn secondary" id="dl-csv" href="#" download>Download all countries (CSV.GZ)</a>
+    <header class="topbar">
+      <div class="wrap topbar-inner">
+        <div class="brand">
+          <div class="logo">VS</div>
+          <div>
+            <div class="title">Vehicle Sales Dataset</div>
+            <div class="subtitle">TradingEconomics · Monthly · Last 10 years</div>
+          </div>
         </div>
-        <p class="muted small">
-          The workflow refreshes weekly and overwrites these files with the latest scrape.
-        </p>
+
+        <div class="status" id="status">
+          <span class="dot"></span>
+          <span class="status-text">Loading…</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="hero card">
+        <div class="hero-left">
+          <h1>Total Vehicle Sales</h1>
+          <p class="lead">
+            One-click downloads for all countries. Auto-refreshes weekly via GitHub Actions.
+          </p>
+
+          <div class="cta-row">
+            <a class="btn primary" id="dl-xlsx" href="#" download>
+              Download XLSX
+              <span class="hint">All countries</span>
+            </a>
+            <a class="btn" id="dl-csv" href="#" download>
+              Download CSV.GZ
+              <span class="hint">Compressed</span>
+            </a>
+          </div>
+
+          <div class="meta-row">
+            <a id="source" href="#" target="_blank" rel="noreferrer">Source</a>
+            <span class="sep">•</span>
+            <span id="cutoff">Cutoff: —</span>
+          </div>
+        </div>
+
+        <div class="hero-right">
+          <div class="stats">
+            <div class="stat">
+              <div class="stat-label">Countries</div>
+              <div class="stat-value" id="stat-countries">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Rows</div>
+              <div class="stat-value" id="stat-rows">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Generated (UTC)</div>
+              <div class="stat-value small" id="stat-generated">—</div>
+            </div>
+          </div>
+
+          <div class="note">
+            Files are replaced each run (latest snapshot). Git history retains prior versions.
+          </div>
+        </div>
       </section>
 
       <section class="card">
-        <h2>Countries covered</h2>
-        <input id="filter" class="input" placeholder="Filter countries…" />
+        <div class="card-head">
+          <h2>Countries covered</h2>
+          <div class="count" id="country-count">—</div>
+        </div>
+
+        <div class="search-row">
+          <input id="filter" class="input" placeholder="Search countries…" />
+          <button id="clear" class="btn small-btn" type="button">Clear</button>
+        </div>
+
         <ul id="countries" class="list"></ul>
       </section>
 
-      <footer class="muted small">
-        Source: <a id="source" href="#" target="_blank" rel="noreferrer">TradingEconomics</a>
+      <footer class="footer">
+        <div class="muted">
+          Hosted on GitHub Pages · <span id="build-id">—</span>
+        </div>
       </footer>
     </main>
 
