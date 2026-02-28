@@ -14,7 +14,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
-
 LIST_URL = "https://tradingeconomics.com/country-list/total-vehicle-sales"
 
 # Output locations (repo-root relative by default)
@@ -28,7 +27,10 @@ MANIFEST_JSON = os.path.join(DATA_DIR, "manifest.json")
 
 # Past 10 years from the first day of the current month (UTC)
 now_utc = datetime.now(timezone.utc)
-cutoff = (now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - relativedelta(years=10))
+cutoff = (
+    now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    - relativedelta(years=10)
+)
 
 
 def build_driver():
@@ -42,24 +44,39 @@ def build_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--lang=en-US")
+    opts.add_argument("--disable-extensions")
 
-    # IMPORTANT: GitHub runners usually have Chromium, not google-chrome
-    chrome_bin_candidates = [
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-    ]
-    for p in chrome_bin_candidates:
-        if os.path.exists(p):
-            opts.binary_location = p
-            break
+    # Force binary via env first (workflow will set this)
+    env_bin = os.environ.get("CHROME_BINARY")
+    if env_bin and os.path.exists(env_bin):
+        opts.binary_location = env_bin
     else:
-        raise RuntimeError(
-            "No Chrome/Chromium binary found. Tried: " + ", ".join(chrome_bin_candidates)
-        )
+        # Fallback to common locations on ubuntu-latest
+        for p in ("/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"):
+            if os.path.exists(p):
+                opts.binary_location = p
+                break
+        else:
+            raise RuntimeError(
+                "No Chrome/Chromium binary found on runner. "
+                "Tried: /usr/bin/chromium, /usr/bin/chromium-browser, /usr/bin/google-chrome"
+            )
 
-    # Let chromedriver be discovered on PATH (after apt install)
-    service = Service()
+    # Pick chromedriver explicitly if provided, else rely on PATH
+    env_driver = os.environ.get("CHROMEDRIVER")
+    if env_driver and os.path.exists(env_driver):
+        service = Service(env_driver)
+    else:
+        # common ubuntu-latest locations
+        for d in ("/usr/bin/chromedriver", "/usr/bin/chromium-driver"):
+            if os.path.exists(d):
+                service = Service(d)
+                break
+        else:
+            service = Service()
+
+    service_path = getattr(service, "_path", None) or getattr(service, "path", None)
+    print(f"[driver] binary={opts.binary_location} driver={service_path}")
     return webdriver.Chrome(service=service, options=opts)
 
 
@@ -97,7 +114,7 @@ def click_te_10y_button(driver):
 
 
 def set_range_to_max_or_10y(driver):
-    js = r'''
+    js = r"""
     function clickRange(label) {
       if (typeof Highcharts === 'undefined' || !Highcharts.charts) return false;
       for (const ch of Highcharts.charts) {
@@ -121,12 +138,12 @@ def set_range_to_max_or_10y(driver):
     if (clickRange('10Y')) return '10Y';
     if (clickRange('ALL')) return 'ALL';
     return null;
-    '''
+    """
     return driver.execute_script(js)
 
 
 def extract_highcharts_series(driver):
-    js = r'''
+    js = r"""
     const results = [];
     if (typeof Highcharts === 'undefined' || !Highcharts.charts) return results;
 
@@ -147,7 +164,7 @@ def extract_highcharts_series(driver):
       }
     }
     return results;
-    '''
+    """
     pts = driver.execute_script(js)
     if not pts:
         return None
@@ -183,8 +200,10 @@ def scrape_country(driver, country, url, retry=2):
 
             df = df[df["date"] >= cutoff]
             df["country"] = country
+
             # normalize date to month start (many series are monthly)
             df["date"] = df["date"].dt.to_period("M").dt.to_timestamp().dt.tz_localize("UTC")
+
             df = df.drop_duplicates(subset=["country", "date"])
             return df[["country", "date", "value"]]
 
