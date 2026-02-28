@@ -19,13 +19,3 @@ pip install -r scraper/requirements.txt
 # Ensure you have Chrome/Chromedriver installed locally
 python scraper/scrape_te_total_vehicle_sales.py
 ```
-
-## Enable GitHub Pages
-
-1. Repo → **Settings → Pages**
-   - Source: **GitHub Actions**
-2. Repo → **Settings → Actions → General**
-   - Workflow permissions: **Read and write**
-
-## Manual refresh
-Actions → **Refresh dataset and deploy site** → Run workflow
