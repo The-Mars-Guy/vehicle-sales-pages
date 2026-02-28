@@ -30,8 +30,12 @@ jobs:
       - name: Install Chromium + Chromedriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver || true
           sudo apt-get install -y chromium chromium-driver
+          echo "== chromium/chromedriver sanity =="
+          which chromium || true
+          which chromedriver || true
+          ls -l /usr/bin/chromium* || true
+          ls -l /usr/bin/chromedriver || true
 
       - name: Install Python deps
         run: |
@@ -41,6 +45,8 @@ jobs:
       - name: Run scraper
         env:
           DATA_DIR: data
+          CHROME_BINARY: /usr/bin/chromium
+          CHROMEDRIVER: /usr/bin/chromedriver
         run: |
           python scraper/scrape_te_total_vehicle_sales.py
 
