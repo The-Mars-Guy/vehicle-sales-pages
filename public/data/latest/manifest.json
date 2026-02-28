@@ -1,0 +1,34 @@
+{
+  "dataset": "Total Vehicle Sales (Monthly)",
+  "source": "https://tradingeconomics.com/",
+  "metric_path": "total-vehicle-sales",
+  "generated_utc": "2026-02-28T19:41:28.416681+00:00",
+  "row_count_master": 1799,
+  "row_count_latest10y": 1796,
+  "country_count": 15,
+  "files": {
+    "master_xlsx": "data/latest/master_total_vehicle_sales.xlsx",
+    "master_csv_gz": "data/latest/master_total_vehicle_sales.csv.gz",
+    "latest10y_xlsx": "data/latest/total_vehicle_sales_monthly_last_10y.xlsx",
+    "latest10y_csv_gz": "data/latest/total_vehicle_sales_monthly_last_10y.csv.gz",
+    "manifest": "data/latest/manifest.json"
+  },
+  "countries": [
+    "Australia",
+    "Brazil",
+    "Chile",
+    "China",
+    "Colombia",
+    "India",
+    "Malaysia",
+    "Mexico",
+    "Philippines",
+    "Russia",
+    "South Africa",
+    "Spain",
+    "Thailand",
+    "Turkey",
+    "United States"
+  ],
+  "latest10y_cutoff_utc": "2016-02-01T00:00:00"
+}
