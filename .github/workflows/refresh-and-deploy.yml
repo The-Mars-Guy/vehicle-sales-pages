@@ -1,10 +1,8 @@
-# .github/workflows/refresh-and-deploy.yml
 name: Refresh dataset and deploy site
 
 on:
   workflow_dispatch:
   schedule:
-    # Weekly. Monday 06:00 UTC (adjust as needed).
     - cron: "0 6 * * 1"
 
 permissions:
@@ -54,10 +52,18 @@ jobs:
           DATA_DIR: data
           CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
           CHROMEDRIVER: ${{ steps.setup-chrome.outputs.chromedriver-path }}
-          # Optional: cap countries for debugging (set to 0 to process all)
-          MAX_COUNTRIES: "0"
         run: |
           python scraper/scrape_te_total_vehicle_sales.py
+
+      # Always upload debug output so you can inspect failures
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: te-debug
+          path: data/debug
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Prepare site bundle
         run: |
