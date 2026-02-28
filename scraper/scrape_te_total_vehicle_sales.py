@@ -1,4 +1,3 @@
-# scraper/scrape_te_total_vehicle_sales.py
 import os
 import json
 import time
@@ -26,7 +25,6 @@ warnings.filterwarnings(
 BASE_URL = "https://tradingeconomics.com"
 METRIC_PATH = "total-vehicle-sales"
 
-# EXACT countries to scrape (in your requested order)
 TARGET_COUNTRIES = [
     "Australia",
     "Brazil",
@@ -45,22 +43,23 @@ TARGET_COUNTRIES = [
     "United States",
 ]
 
-# Slug overrides where needed (most are handled by default slugify below)
 SLUG_OVERRIDES = {
     "United States": "united-states",
     "South Africa": "south-africa",
 }
 
-# Output locations (repo-root relative by default)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(REPO_ROOT, "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
+
+DEBUG_DIR = os.path.join(DATA_DIR, "debug")
+os.makedirs(DEBUG_DIR, exist_ok=True)
 
 OUTPUT_XLSX = os.path.join(DATA_DIR, "total_vehicle_sales_monthly_last_10y.xlsx")
 OUTPUT_CSV_GZ = os.path.join(DATA_DIR, "total_vehicle_sales_monthly_last_10y.csv.gz")
 MANIFEST_JSON = os.path.join(DATA_DIR, "manifest.json")
 
-# Past 10 years from the first day of the current month (UTC), store cutoff as naive timestamp for CSV/XLSX friendliness
+# Past 10 years from first day of current month (UTC), stored as naive timestamps (good for CSV/XLSX)
 now_utc = datetime.now(timezone.utc)
 cutoff = (
     now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -71,7 +70,6 @@ cutoff = (
 def slugify_country(country: str) -> str:
     if country in SLUG_OVERRIDES:
         return SLUG_OVERRIDES[country]
-    # TradingEconomics slugs are typically lowercase with hyphens
     return country.strip().lower().replace(" ", "-")
 
 
@@ -82,8 +80,6 @@ def country_url(country: str) -> str:
 
 def build_driver():
     opts = Options()
-
-    # Headless for GitHub Actions
     opts.add_argument("--headless=new")
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--disable-blink-features=AutomationControlled")
@@ -97,7 +93,6 @@ def build_driver():
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     )
 
-    # Force binary via env first (workflow sets this)
     env_bin = os.environ.get("CHROME_BINARY")
     if env_bin and os.path.exists(env_bin):
         opts.binary_location = env_bin
@@ -109,41 +104,45 @@ def build_driver():
         else:
             raise RuntimeError("No Chrome/Chromium binary found on runner.")
 
-    # Pick chromedriver explicitly if provided, else rely on PATH
     env_driver = os.environ.get("CHROMEDRIVER")
     if env_driver and os.path.exists(env_driver):
         service = Service(env_driver)
     else:
-        for d in ("/usr/bin/chromedriver", "/usr/bin/chromium-driver"):
-            if os.path.exists(d):
-                service = Service(d)
-                break
-        else:
-            service = Service()
+        service = Service()
 
     service_path = getattr(service, "_path", None) or getattr(service, "path", None)
     print(f"[driver] binary={opts.binary_location} driver={service_path}", flush=True)
     return webdriver.Chrome(service=service, options=opts)
 
 
-def _debug_dump(driver, label: str):
+def _dump_artifacts(driver, slug: str, label: str):
+    """
+    Writes:
+      data/debug/<slug>__<label>.html
+      data/debug/<slug>__<label>.png
+    """
     try:
-        title = driver.title
-    except Exception:
-        title = "<no title>"
+        html_path = os.path.join(DEBUG_DIR, f"{slug}__{label}.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(driver.page_source or "")
+        print(f"[debug] wrote {html_path}", flush=True)
+    except Exception as e:
+        print(f"[debug] failed to write html: {e}", flush=True)
+
     try:
-        url = driver.current_url
-    except Exception:
-        url = "<no url>"
+        png_path = os.path.join(DEBUG_DIR, f"{slug}__{label}.png")
+        driver.save_screenshot(png_path)
+        print(f"[debug] wrote {png_path}", flush=True)
+    except Exception as e:
+        print(f"[debug] failed to write screenshot: {e}", flush=True)
+
     try:
-        html = driver.page_source or ""
-        snippet = html[:800].replace("\n", " ").replace("\r", " ")
+        print(f"[debug] title={driver.title!r} url={driver.current_url!r}", flush=True)
     except Exception:
-        snippet = "<no html>"
-    print(f"[debug:{label}] title={title!r} url={url!r} html_snippet={snippet!r}", flush=True)
+        pass
 
 
-def wait_for_highcharts(driver, timeout=45):
+def wait_for_highcharts(driver, timeout=60):
     WebDriverWait(driver, timeout).until(
         lambda d: d.execute_script(
             "return typeof Highcharts !== 'undefined' && Highcharts.charts && Highcharts.charts.length > 0;"
@@ -154,7 +153,7 @@ def wait_for_highcharts(driver, timeout=45):
 def click_te_10y_button(driver):
     sel = "a.hawk-chartOptions-datePicker-cnt-btn[data-span_str='10Y']"
     try:
-        btn = WebDriverWait(driver, 8).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+        btn = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
         driver.execute_script("arguments[0].click();", btn)
         return True
     except TimeoutException:
@@ -173,15 +172,11 @@ def set_range_to_max_or_10y(driver):
         for (let i = 0; i < rs.buttons.length; i++) {
           const btn = rs.buttons[i];
           const txt = (btn && btn.textStr) ? btn.textStr.toUpperCase().replace(/\s/g,'') : '';
-          if (txt === label) {
-            rs.clickButton(i, true);
-            return true;
-          }
+          if (txt === label) { rs.clickButton(i, true); return true; }
         }
       }
       return false;
     }
-
     if (clickRange('MAX')) return 'MAX';
     if (clickRange('10Y')) return '10Y';
     if (clickRange('ALL')) return 'ALL';
@@ -200,7 +195,6 @@ def extract_highcharts_series(driver):
 
       for (const s of ch.series) {
         if (!s || !s.points || s.points.length === 0) continue;
-
         if (s.options && (s.options.isInternal || s.options.id === 'navigator')) continue;
 
         for (const p of s.points) {
@@ -224,39 +218,39 @@ def extract_highcharts_series(driver):
 
 
 def scrape_country(driver, country, url, retry=2):
+    slug = slugify_country(country)
     last_err = None
+
     for attempt in range(retry + 1):
         try:
             driver.get(url)
-            WebDriverWait(driver, 45).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             time.sleep(2)
 
-            # Basic block/challenge detection early
-            lower = (driver.page_source or "").lower()
-            if any(s in lower for s in ["captcha", "verify you are human", "attention required", "cloudflare"]):
-                _debug_dump(driver, f"blocked_{slugify_country(country)}")
-                raise RuntimeError("Blocked by anti-bot/challenge page.")
+            # Try to wait for charts to initialize
+            try:
+                wait_for_highcharts(driver, timeout=60)
+            except TimeoutException as e:
+                # Not "blocked" necessarily; chart JS may not be running on runner
+                _dump_artifacts(driver, slug, f"no_highcharts_attempt{attempt}")
+                raise e
 
-            wait_for_highcharts(driver, timeout=45)
-
+            # Try selecting 10Y
             clicked = click_te_10y_button(driver)
             if clicked:
                 time.sleep(2)
-
-            if not clicked:
+            else:
                 chosen = set_range_to_max_or_10y(driver)
                 if chosen:
                     time.sleep(2)
 
             df = extract_highcharts_series(driver)
             if df is None or df.empty:
-                _debug_dump(driver, f"no_series_{slugify_country(country)}")
+                _dump_artifacts(driver, slug, f"no_series_attempt{attempt}")
                 return None
 
-            # Normalize to month start as naive timestamps (best for CSV/XLSX)
+            # month start naive timestamps for output
             df["date"] = df["date"].dt.to_period("M").dt.to_timestamp()
-
-            # Apply cutoff (naive)
             df = df[df["date"] >= cutoff]
 
             df["country"] = country
@@ -322,10 +316,10 @@ def main():
                 elapsed = int(time.time() - start)
                 print(f"[progress] {i}/{len(items)} processed in {elapsed}s", flush=True)
 
-            time.sleep(1.0)  # be polite
+            time.sleep(1.0)
 
         if not all_rows:
-            raise RuntimeError("No data extracted for any target country (blocked or chart not accessible).")
+            raise RuntimeError("No data extracted for any target country (charts not initialized / blocked JS / layout changed).")
 
         panel = pd.concat(all_rows, ignore_index=True)
         write_outputs(panel)
