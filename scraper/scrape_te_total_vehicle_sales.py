@@ -2,6 +2,7 @@ import os
 import json
 import time
 import gzip
+import warnings
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 
@@ -15,7 +16,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 
+warnings.filterwarnings(
+    "ignore",
+    message="Converting to PeriodArray/Index representation will drop timezone information.",
+    category=UserWarning,
+)
+
 LIST_URL = "https://tradingeconomics.com/country-list/total-vehicle-sales"
+
+# Optional debugging cap (set MAX_COUNTRIES env var in Actions to e.g. 30)
+MAX_COUNTRIES = int(os.environ.get("MAX_COUNTRIES", "0"))  # 0 = no cap
 
 # Output locations (repo-root relative by default)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -26,12 +36,12 @@ OUTPUT_XLSX = os.path.join(DATA_DIR, "total_vehicle_sales_monthly_last_10y.xlsx"
 OUTPUT_CSV_GZ = os.path.join(DATA_DIR, "total_vehicle_sales_monthly_last_10y.csv.gz")
 MANIFEST_JSON = os.path.join(DATA_DIR, "manifest.json")
 
-# Past 10 years from the first day of the current month (UTC)
+# Past 10 years from the first day of the current month (UTC), but store cutoff as naive timestamp
 now_utc = datetime.now(timezone.utc)
 cutoff = (
     now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     - relativedelta(years=10)
-)
+).replace(tzinfo=None)
 
 
 def build_driver():
@@ -46,8 +56,6 @@ def build_driver():
     opts.add_argument("--disable-gpu")
     opts.add_argument("--lang=en-US")
     opts.add_argument("--disable-extensions")
-
-    # More realistic UA (helps avoid some headless gating)
     opts.add_argument(
         "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
@@ -58,23 +66,18 @@ def build_driver():
     if env_bin and os.path.exists(env_bin):
         opts.binary_location = env_bin
     else:
-        # Fallback to common locations on ubuntu-latest
-        for p in ("/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"):
+        for p in ("/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"):
             if os.path.exists(p):
                 opts.binary_location = p
                 break
         else:
-            raise RuntimeError(
-                "No Chrome/Chromium binary found on runner. "
-                "Tried: /usr/bin/chromium, /usr/bin/chromium-browser, /usr/bin/google-chrome"
-            )
+            raise RuntimeError("No Chrome/Chromium binary found on runner.")
 
     # Pick chromedriver explicitly if provided, else rely on PATH
     env_driver = os.environ.get("CHROMEDRIVER")
     if env_driver and os.path.exists(env_driver):
         service = Service(env_driver)
     else:
-        # common ubuntu-latest locations
         for d in ("/usr/bin/chromedriver", "/usr/bin/chromium-driver"):
             if os.path.exists(d):
                 service = Service(d)
@@ -83,7 +86,7 @@ def build_driver():
             service = Service()
 
     service_path = getattr(service, "_path", None) or getattr(service, "path", None)
-    print(f"[driver] binary={opts.binary_location} driver={service_path}")
+    print(f"[driver] binary={opts.binary_location} driver={service_path}", flush=True)
     return webdriver.Chrome(service=service, options=opts)
 
 
@@ -101,10 +104,10 @@ def _debug_dump(driver, label: str):
         snippet = html[:800].replace("\n", " ").replace("\r", " ")
     except Exception:
         snippet = "<no html>"
-    print(f"[debug:{label}] title={title!r} url={url!r} html_snippet={snippet!r}")
+    print(f"[debug:{label}] title={title!r} url={url!r} html_snippet={snippet!r}", flush=True)
 
 
-def wait_for_highcharts(driver, timeout=25):
+def wait_for_highcharts(driver, timeout=45):
     WebDriverWait(driver, timeout).until(
         lambda d: d.execute_script(
             "return typeof Highcharts !== 'undefined' && Highcharts.charts && Highcharts.charts.length > 0;"
@@ -115,20 +118,17 @@ def wait_for_highcharts(driver, timeout=25):
 def get_country_links(driver):
     driver.get(LIST_URL)
 
-    # Wait for DOM ready
     WebDriverWait(driver, 30).until(
         lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
     )
     time.sleep(2)
 
-    # Wait for expected anchors (more specific than waiting for a <table>)
     try:
         WebDriverWait(driver, 45).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/total-vehicle-sales']"))
         )
     except TimeoutException:
         _debug_dump(driver, "country_list_timeout")
-
         lower = (driver.page_source or "").lower()
         block_signals = [
             "cloudflare",
@@ -140,11 +140,9 @@ def get_country_links(driver):
         ]
         if any(s in lower for s in block_signals):
             raise RuntimeError(
-                "Blocked by anti-bot / challenge page. "
-                "TradingEconomics likely prevented headless scraping on GitHub Actions."
+                "Blocked by anti-bot / challenge page. TradingEconomics likely prevented headless scraping on GitHub Actions."
             )
-
-        print("[warn] Anchor wait timed out; attempting best-effort link extraction...")
+        print("[warn] Anchor wait timed out; attempting best-effort link extraction...", flush=True)
 
     anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/total-vehicle-sales']")
     out = {}
@@ -256,12 +254,13 @@ def scrape_country(driver, country, url, retry=2):
             if df is None or df.empty:
                 return None
 
+            # Normalize to month start as naive timestamps (best for CSV/XLSX)
+            df["date"] = df["date"].dt.to_period("M").dt.to_timestamp()
+
+            # Apply cutoff (naive)
             df = df[df["date"] >= cutoff]
+
             df["country"] = country
-
-            # normalize date to month start (many series are monthly)
-            df["date"] = df["date"].dt.to_period("M").dt.to_timestamp().dt.tz_localize("UTC")
-
             df = df.drop_duplicates(subset=["country", "date"])
             return df[["country", "date", "value"]]
 
@@ -269,7 +268,7 @@ def scrape_country(driver, country, url, retry=2):
             last_err = e
             time.sleep(2 + attempt)
 
-    print(f"  !! Failed after retries for {country}: {last_err}")
+    print(f"  !! Failed after retries for {country}: {last_err}", flush=True)
     return None
 
 
@@ -279,7 +278,6 @@ def write_outputs(panel: pd.DataFrame):
     with pd.ExcelWriter(OUTPUT_XLSX, engine="openpyxl") as writer:
         panel.to_excel(writer, sheet_name="panel", index=False)
 
-    # compact gzip csv for web download
     csv_bytes = panel.to_csv(index=False).encode("utf-8")
     with gzip.open(OUTPUT_CSV_GZ, "wb") as f:
         f.write(csv_bytes)
@@ -308,15 +306,28 @@ def main():
         if not countries:
             raise RuntimeError("Could not find country links on the list page (site may have changed).")
 
-        all_rows = []
         items = list(countries.items())
+        if MAX_COUNTRIES > 0:
+            items = items[:MAX_COUNTRIES]
+
+        print(f"[info] countries_found={len(countries)} will_process={len(items)}", flush=True)
+
+        all_rows = []
+        start = time.time()
+
         for i, (country, url) in enumerate(items, 1):
-            print(f"[{i}/{len(items)}] {country} -> {url}")
+            print(f"[{i}/{len(items)}] {country} -> {url}", flush=True)
+
             df = scrape_country(driver, country, url, retry=2)
             if df is not None and not df.empty:
                 all_rows.append(df)
+                print(f"  [ok] rows={len(df)}", flush=True)
             else:
-                print(f"  !! No chart data extracted for {country}")
+                print(f"  [warn] no data extracted", flush=True)
+
+            if i % 10 == 0:
+                elapsed = int(time.time() - start)
+                print(f"[progress] {i}/{len(items)} processed in {elapsed}s", flush=True)
 
             time.sleep(1.0)  # be polite
 
@@ -325,7 +336,7 @@ def main():
 
         panel = pd.concat(all_rows, ignore_index=True)
         write_outputs(panel)
-        print(f"\nSaved:\n- {OUTPUT_XLSX}\n- {OUTPUT_CSV_GZ}\n- {MANIFEST_JSON}")
+        print(f"\nSaved:\n- {OUTPUT_XLSX}\n- {OUTPUT_CSV_GZ}\n- {MANIFEST_JSON}", flush=True)
 
     finally:
         driver.quit()
