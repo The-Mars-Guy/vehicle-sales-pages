@@ -1,3 +1,4 @@
+# scraper/scrape_te_total_vehicle_sales.py
 import os
 import json
 import time
@@ -22,10 +23,33 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-LIST_URL = "https://tradingeconomics.com/country-list/total-vehicle-sales"
+BASE_URL = "https://tradingeconomics.com"
+METRIC_PATH = "total-vehicle-sales"
 
-# Optional debugging cap (set MAX_COUNTRIES env var in Actions to e.g. 30)
-MAX_COUNTRIES = int(os.environ.get("MAX_COUNTRIES", "0"))  # 0 = no cap
+# EXACT countries to scrape (in your requested order)
+TARGET_COUNTRIES = [
+    "Australia",
+    "Brazil",
+    "Chile",
+    "China",
+    "Colombia",
+    "India",
+    "Malaysia",
+    "Mexico",
+    "Philippines",
+    "Russia",
+    "South Africa",
+    "Spain",
+    "Thailand",
+    "Turkey",
+    "United States",
+]
+
+# Slug overrides where needed (most are handled by default slugify below)
+SLUG_OVERRIDES = {
+    "United States": "united-states",
+    "South Africa": "south-africa",
+}
 
 # Output locations (repo-root relative by default)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -36,12 +60,24 @@ OUTPUT_XLSX = os.path.join(DATA_DIR, "total_vehicle_sales_monthly_last_10y.xlsx"
 OUTPUT_CSV_GZ = os.path.join(DATA_DIR, "total_vehicle_sales_monthly_last_10y.csv.gz")
 MANIFEST_JSON = os.path.join(DATA_DIR, "manifest.json")
 
-# Past 10 years from the first day of the current month (UTC), but store cutoff as naive timestamp
+# Past 10 years from the first day of the current month (UTC), store cutoff as naive timestamp for CSV/XLSX friendliness
 now_utc = datetime.now(timezone.utc)
 cutoff = (
     now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     - relativedelta(years=10)
 ).replace(tzinfo=None)
+
+
+def slugify_country(country: str) -> str:
+    if country in SLUG_OVERRIDES:
+        return SLUG_OVERRIDES[country]
+    # TradingEconomics slugs are typically lowercase with hyphens
+    return country.strip().lower().replace(" ", "-")
+
+
+def country_url(country: str) -> str:
+    slug = slugify_country(country)
+    return f"{BASE_URL}/{slug}/{METRIC_PATH}"
 
 
 def build_driver():
@@ -61,7 +97,7 @@ def build_driver():
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     )
 
-    # Force binary via env first (workflow will set this)
+    # Force binary via env first (workflow sets this)
     env_bin = os.environ.get("CHROME_BINARY")
     if env_bin and os.path.exists(env_bin):
         opts.binary_location = env_bin
@@ -113,50 +149,6 @@ def wait_for_highcharts(driver, timeout=45):
             "return typeof Highcharts !== 'undefined' && Highcharts.charts && Highcharts.charts.length > 0;"
         )
     )
-
-
-def get_country_links(driver):
-    driver.get(LIST_URL)
-
-    WebDriverWait(driver, 30).until(
-        lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
-    )
-    time.sleep(2)
-
-    try:
-        WebDriverWait(driver, 45).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/total-vehicle-sales']"))
-        )
-    except TimeoutException:
-        _debug_dump(driver, "country_list_timeout")
-        lower = (driver.page_source or "").lower()
-        block_signals = [
-            "cloudflare",
-            "attention required",
-            "verify you are human",
-            "captcha",
-            "access denied",
-            "unusual traffic",
-        ]
-        if any(s in lower for s in block_signals):
-            raise RuntimeError(
-                "Blocked by anti-bot / challenge page. TradingEconomics likely prevented headless scraping on GitHub Actions."
-            )
-        print("[warn] Anchor wait timed out; attempting best-effort link extraction...", flush=True)
-
-    anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/total-vehicle-sales']")
-    out = {}
-    for a in anchors:
-        name = (a.text or "").strip()
-        href = a.get_attribute("href")
-        if name and href:
-            out[name] = href
-
-    if out:
-        return out
-
-    _debug_dump(driver, "country_list_no_links")
-    raise RuntimeError("Could not find any country links on the list page. Page structure or access likely changed.")
 
 
 def click_te_10y_button(driver):
@@ -239,6 +231,12 @@ def scrape_country(driver, country, url, retry=2):
             WebDriverWait(driver, 45).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             time.sleep(2)
 
+            # Basic block/challenge detection early
+            lower = (driver.page_source or "").lower()
+            if any(s in lower for s in ["captcha", "verify you are human", "attention required", "cloudflare"]):
+                _debug_dump(driver, f"blocked_{slugify_country(country)}")
+                raise RuntimeError("Blocked by anti-bot/challenge page.")
+
             wait_for_highcharts(driver, timeout=45)
 
             clicked = click_te_10y_button(driver)
@@ -252,6 +250,7 @@ def scrape_country(driver, country, url, retry=2):
 
             df = extract_highcharts_series(driver)
             if df is None or df.empty:
+                _debug_dump(driver, f"no_series_{slugify_country(country)}")
                 return None
 
             # Normalize to month start as naive timestamps (best for CSV/XLSX)
@@ -268,7 +267,7 @@ def scrape_country(driver, country, url, retry=2):
             last_err = e
             time.sleep(2 + attempt)
 
-    print(f"  !! Failed after retries for {country}: {last_err}", flush=True)
+    print(f"  [fail] {country}: {last_err}", flush=True)
     return None
 
 
@@ -284,7 +283,8 @@ def write_outputs(panel: pd.DataFrame):
 
     manifest = {
         "dataset": "Total Vehicle Sales (Monthly, last 10y)",
-        "source": LIST_URL,
+        "source": f"{BASE_URL}/",
+        "metric_path": METRIC_PATH,
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "cutoff_utc": cutoff.isoformat(),
         "row_count": int(panel.shape[0]),
@@ -293,7 +293,7 @@ def write_outputs(panel: pd.DataFrame):
             "xlsx": "data/total_vehicle_sales_monthly_last_10y.xlsx",
             "csv_gz": "data/total_vehicle_sales_monthly_last_10y.csv.gz",
         },
-        "countries": sorted(panel["country"].unique().tolist()),
+        "countries": TARGET_COUNTRIES,
     }
     with open(MANIFEST_JSON, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
@@ -302,15 +302,8 @@ def write_outputs(panel: pd.DataFrame):
 def main():
     driver = build_driver()
     try:
-        countries = get_country_links(driver)
-        if not countries:
-            raise RuntimeError("Could not find country links on the list page (site may have changed).")
-
-        items = list(countries.items())
-        if MAX_COUNTRIES > 0:
-            items = items[:MAX_COUNTRIES]
-
-        print(f"[info] countries_found={len(countries)} will_process={len(items)}", flush=True)
+        items = [(c, country_url(c)) for c in TARGET_COUNTRIES]
+        print(f"[info] will_process={len(items)} countries", flush=True)
 
         all_rows = []
         start = time.time()
@@ -323,16 +316,16 @@ def main():
                 all_rows.append(df)
                 print(f"  [ok] rows={len(df)}", flush=True)
             else:
-                print(f"  [warn] no data extracted", flush=True)
+                print("  [warn] no data extracted", flush=True)
 
-            if i % 10 == 0:
+            if i % 5 == 0:
                 elapsed = int(time.time() - start)
                 print(f"[progress] {i}/{len(items)} processed in {elapsed}s", flush=True)
 
             time.sleep(1.0)  # be polite
 
         if not all_rows:
-            raise RuntimeError("No data extracted. TE may be blocking or charts not accessible in your session.")
+            raise RuntimeError("No data extracted for any target country (blocked or chart not accessible).")
 
         panel = pd.concat(all_rows, ignore_index=True)
         write_outputs(panel)
