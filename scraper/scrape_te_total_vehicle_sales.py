@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
+
 LIST_URL = "https://tradingeconomics.com/country-list/total-vehicle-sales"
 
 # Output locations (repo-root relative by default)
@@ -45,6 +46,12 @@ def build_driver():
     opts.add_argument("--disable-gpu")
     opts.add_argument("--lang=en-US")
     opts.add_argument("--disable-extensions")
+
+    # More realistic UA (helps avoid some headless gating)
+    opts.add_argument(
+        "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    )
 
     # Force binary via env first (workflow will set this)
     env_bin = os.environ.get("CHROME_BINARY")
@@ -80,6 +87,23 @@ def build_driver():
     return webdriver.Chrome(service=service, options=opts)
 
 
+def _debug_dump(driver, label: str):
+    try:
+        title = driver.title
+    except Exception:
+        title = "<no title>"
+    try:
+        url = driver.current_url
+    except Exception:
+        url = "<no url>"
+    try:
+        html = driver.page_source or ""
+        snippet = html[:800].replace("\n", " ").replace("\r", " ")
+    except Exception:
+        snippet = "<no html>"
+    print(f"[debug:{label}] title={title!r} url={url!r} html_snippet={snippet!r}")
+
+
 def wait_for_highcharts(driver, timeout=25):
     WebDriverWait(driver, timeout).until(
         lambda d: d.execute_script(
@@ -90,23 +114,57 @@ def wait_for_highcharts(driver, timeout=25):
 
 def get_country_links(driver):
     driver.get(LIST_URL)
-    WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
-    time.sleep(1)
 
-    anchors = driver.find_elements(By.CSS_SELECTOR, "table a[href*='/total-vehicle-sales']")
+    # Wait for DOM ready
+    WebDriverWait(driver, 30).until(
+        lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+    )
+    time.sleep(2)
+
+    # Wait for expected anchors (more specific than waiting for a <table>)
+    try:
+        WebDriverWait(driver, 45).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/total-vehicle-sales']"))
+        )
+    except TimeoutException:
+        _debug_dump(driver, "country_list_timeout")
+
+        lower = (driver.page_source or "").lower()
+        block_signals = [
+            "cloudflare",
+            "attention required",
+            "verify you are human",
+            "captcha",
+            "access denied",
+            "unusual traffic",
+        ]
+        if any(s in lower for s in block_signals):
+            raise RuntimeError(
+                "Blocked by anti-bot / challenge page. "
+                "TradingEconomics likely prevented headless scraping on GitHub Actions."
+            )
+
+        print("[warn] Anchor wait timed out; attempting best-effort link extraction...")
+
+    anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/total-vehicle-sales']")
     out = {}
     for a in anchors:
         name = (a.text or "").strip()
         href = a.get_attribute("href")
         if name and href:
             out[name] = href
-    return out
+
+    if out:
+        return out
+
+    _debug_dump(driver, "country_list_no_links")
+    raise RuntimeError("Could not find any country links on the list page. Page structure or access likely changed.")
 
 
 def click_te_10y_button(driver):
     sel = "a.hawk-chartOptions-datePicker-cnt-btn[data-span_str='10Y']"
     try:
-        btn = WebDriverWait(driver, 6).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+        btn = WebDriverWait(driver, 8).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
         driver.execute_script("arguments[0].click();", btn)
         return True
     except TimeoutException:
@@ -180,10 +238,10 @@ def scrape_country(driver, country, url, retry=2):
     for attempt in range(retry + 1):
         try:
             driver.get(url)
-            WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            WebDriverWait(driver, 45).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             time.sleep(2)
 
-            wait_for_highcharts(driver, timeout=25)
+            wait_for_highcharts(driver, timeout=45)
 
             clicked = click_te_10y_button(driver)
             if clicked:
