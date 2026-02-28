@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Total Vehicle Sales (Monthly, last 10y)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Total Vehicle Sales (Monthly, last 10y)</h1>
+      <p class="muted" id="meta">Loading…</p>
+
+      <section class="card">
+        <h2>Downloads</h2>
+        <div class="buttons">
+          <a class="btn" id="dl-xlsx" href="#" download>Download all countries (XLSX)</a>
+          <a class="btn secondary" id="dl-csv" href="#" download>Download all countries (CSV.GZ)</a>
+        </div>
+        <p class="muted small">
+          The workflow refreshes weekly and overwrites these files with the latest scrape.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Countries covered</h2>
+        <input id="filter" class="input" placeholder="Filter countries…" />
+        <ul id="countries" class="list"></ul>
+      </section>
+
+      <footer class="muted small">
+        Source: <a id="source" href="#" target="_blank" rel="noreferrer">TradingEconomics</a>
+      </footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
