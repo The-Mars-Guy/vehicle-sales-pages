@@ -37,14 +37,28 @@ def build_driver():
     # Headless for GitHub Actions
     opts.add_argument("--headless=new")
     opts.add_argument("--window-size=1920,1080")
-
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--lang=en-US")
 
-    # Use system chromedriver/chromium on ubuntu-latest
+    # IMPORTANT: GitHub runners usually have Chromium, not google-chrome
+    chrome_bin_candidates = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ]
+    for p in chrome_bin_candidates:
+        if os.path.exists(p):
+            opts.binary_location = p
+            break
+    else:
+        raise RuntimeError(
+            "No Chrome/Chromium binary found. Tried: " + ", ".join(chrome_bin_candidates)
+        )
+
+    # Let chromedriver be discovered on PATH (after apt install)
     service = Service()
     return webdriver.Chrome(service=service, options=opts)
 
