@@ -27,15 +27,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Chromium + Chromedriver
+      # ✅ Install a real Chrome binary + matching ChromeDriver (reliable on ubuntu-latest)
+      - name: Setup Chrome + ChromeDriver
+        uses: browser-actions/setup-chrome@v2
+        id: setup-chrome
+        with:
+          chrome-version: stable
+          install-chromedriver: true
+
+      - name: Sanity check Chrome install
         run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium chromium-driver
-          echo "== chromium/chromedriver sanity =="
-          which chromium || true
-          which chromedriver || true
-          ls -l /usr/bin/chromium* || true
-          ls -l /usr/bin/chromedriver || true
+          echo "chrome-path: ${{ steps.setup-chrome.outputs.chrome-path }}"
+          echo "chromedriver-path: ${{ steps.setup-chrome.outputs.chromedriver-path }}"
+          ${{ steps.setup-chrome.outputs.chrome-path }} --version
+          ${{ steps.setup-chrome.outputs.chromedriver-path }} --version
 
       - name: Install Python deps
         run: |
@@ -45,8 +50,8 @@ jobs:
       - name: Run scraper
         env:
           DATA_DIR: data
-          CHROME_BINARY: /usr/bin/chromium
-          CHROMEDRIVER: /usr/bin/chromedriver
+          CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
+          CHROMEDRIVER: ${{ steps.setup-chrome.outputs.chromedriver-path }}
         run: |
           python scraper/scrape_te_total_vehicle_sales.py
 
