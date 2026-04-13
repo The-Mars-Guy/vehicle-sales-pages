@@ -2,9 +2,9 @@
   "dataset": "Total Vehicle Sales (Monthly)",
   "source": "https://tradingeconomics.com/",
   "metric_path": "total-vehicle-sales",
-  "generated_utc": "2026-04-06T07:24:40.919076+00:00",
-  "row_count_master": 1819,
-  "row_count_latest10y": 1786,
+  "generated_utc": "2026-04-13T07:56:57.958771+00:00",
+  "row_count_master": 1822,
+  "row_count_latest10y": 1789,
   "country_count": 15,
   "files": {
     "master_xlsx": "data/latest/master_total_vehicle_sales.xlsx",
