@@ -2,9 +2,9 @@
   "dataset": "Total Vehicle Sales (Monthly)",
   "source": "https://tradingeconomics.com/",
   "metric_path": "total-vehicle-sales",
-  "generated_utc": "2026-10-26T12:08:29.352985+00:00",
-  "row_count_master": 1920,
-  "row_count_latest10y": 1797,
+  "generated_utc": "2026-11-02T14:34:57.062829+00:00",
+  "row_count_master": 1923,
+  "row_count_latest10y": 1785,
   "country_count": 15,
   "files": {
     "master_xlsx": "data/latest/master_total_vehicle_sales.xlsx",
@@ -30,5 +30,5 @@
     "Turkey",
     "United States"
   ],
-  "latest10y_cutoff_utc": "2016-10-01T00:00:00"
+  "latest10y_cutoff_utc": "2016-11-01T00:00:00"
 }
